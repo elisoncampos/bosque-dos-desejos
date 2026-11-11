@@ -17,6 +17,7 @@ export type ForestCallbacks = {
   onReady?: () => void;
   onRegion?: (name: string) => void;
   onMove?: (position: ForestPosition) => void;
+  onExplore?: (cell: { x: number; z: number }) => void;
 };
 export type ForestController = {
   setPlaying: (playing: boolean) => void;
@@ -26,6 +27,7 @@ export type ForestController = {
   interact: () => void;
   tryUse: (id: PuzzleAction) => boolean;
   destroy: () => void;
+  pose: () => { x: number; z: number; yaw: number };
   teleportToStart: () => void;
   setCheckpoint: (x: number, z: number) => void;
   wakeAt: (x: number, z: number) => void;
@@ -455,6 +457,7 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   let lastMove = 0;
   let lastProximity = 0;
   let lastRegion = "";
+  let exploredKey = "";
   let nearChest: ChestId | null = null;
   let frame = 0;
   let animation = 0;
@@ -598,6 +601,10 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       axeHand.visible = equipped === "axe";
       axeHand.rotation.set(0.2 - strike * 1.2, 0.35, -0.8 - Math.max(0, strike) * 0.3);
       axeHand.position.set(0.46 - Math.max(0, strike) * 0.16, -0.36 + Math.sin(travel * 3.2) * 0.012 + Math.min(0, strike) * 0.06, -0.58);
+      const columnNow = Math.round(camera.position.x / maze.cellSize);
+      const rowNow = Math.round(camera.position.z / maze.cellSize);
+      const exploreKey = `${columnNow}:${rowNow}`;
+      if (exploreKey !== exploredKey) { exploredKey = exploreKey; callbacks.onExplore?.({ x: columnNow, z: rowNow }); }
       if (time - lastMove > 4) { callbacks.onMove?.(position()); lastMove = time; }
       if (time - lastProximity > 0.15) {
         lastProximity = time;
@@ -666,6 +673,7 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       resize();
     },
     interact,
+    pose: () => ({ x: camera.position.x / maze.cellSize, z: camera.position.z / maze.cellSize, yaw }),
     setEquipped(item) { equipped = item; if (item !== "axe") swingT = -1; axeHand.visible = item === "axe" && playing; },
     tryUse(id) {
       if (!playing || puzzleActions.has(id)) return false;

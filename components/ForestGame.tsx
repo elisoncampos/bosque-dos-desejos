@@ -4,10 +4,60 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ArrowLeft, ArrowRight, Axe, BookOpen, Check, ChevronRight, Compass, Gem, Gift, Headphones, Heart, Leaf, LoaderCircle, Mouse, Pause, Play, RotateCcw, Sparkles, Trees, Volume2, VolumeX, Wind, X } from "lucide-react";
 import type { ForestController } from "@/components/forest/engine";
 import { FairyMark, Fireflies, LeafCorner, VineFrame, WoodEmblem } from "@/components/forest/ui-ornaments";
-import { CHEST_IDS, type ChestId } from "@/lib/maze";
-import { ITEM_NAMES, type PuzzleAction, type PuzzleTarget, type PuzzleState } from "@/lib/puzzles";
+import { CHEST_IDS, createMaze, type ChestId } from "@/lib/maze";
+import { ITEM_NAMES, PUZZLES, type PuzzleAction, type PuzzleTarget, type PuzzleState } from "@/lib/puzzles";
 
 type Discovery = { chestId: ChestId; title: string; description: string; discoveredAt: string };
+const WORLD = createMaze();
+const MAP_CELL = 4;
+const LAMP = 4;
+
+function TrailMap({ seen, stamp, pose }: { seen: Uint8Array; stamp: number; pose: () => { x: number; z: number; yaw: number } | null }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const marker = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const node = canvas.current;
+    const ctx = node?.getContext("2d");
+    if (!node || !ctx) return;
+    const { width, height, grid, chests, cellSize } = WORLD;
+    ctx.clearRect(0, 0, width * MAP_CELL, height * MAP_CELL);
+    ctx.fillStyle = "#0e1c16";
+    ctx.fillRect(0, 0, width * MAP_CELL, height * MAP_CELL);
+    ctx.fillStyle = "#d7e4b6";
+    for (let z = 0; z < height; z++) {
+      for (let x = 0; x < width; x++) {
+        if (grid[z][x] !== 0 || !seen[z * width + x]) continue;
+        ctx.fillRect(x * MAP_CELL, z * MAP_CELL, MAP_CELL, MAP_CELL);
+      }
+    }
+    const mark = (x: number, z: number, color: string) => {
+      if (!seen[z * width + x]) return;
+      ctx.fillStyle = color;
+      ctx.fillRect(x * MAP_CELL, z * MAP_CELL, MAP_CELL, MAP_CELL);
+    };
+    mark(PUZZLES.river.gate.x, PUZZLES.river.gate.z, "#7ec8d4");
+    mark(PUZZLES.vines.gate.x, PUZZLES.vines.gate.z, "#3f6b45");
+    for (const camp of PUZZLES.campfires) mark(Math.round(camp.x / cellSize), Math.round(camp.z / cellSize), "#ffb15a");
+    for (const chest of chests) mark(chest.x, chest.z, "#e2b15a");
+  }, [seen, stamp]);
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
+      const node = marker.current;
+      const here = pose();
+      if (!node) return;
+      if (!here) { node.hidden = true; return; }
+      node.hidden = false;
+      node.style.left = `${(here.x / WORLD.width) * 100}%`;
+      node.style.top = `${(here.z / WORLD.height) * 100}%`;
+      node.style.transform = `translate(-50%, -50%) rotate(${-here.yaw}rad)`;
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [pose]);
+  return <div className="trail-map"><small>Por onde você passou</small><div className="trail-board"><canvas ref={canvas} width={WORLD.width * MAP_CELL} height={WORLD.height * MAP_CELL} /><span ref={marker} className="trail-you" hidden /></div></div>;
+}
 type Panel = "controls" | "journal" | "pause" | null;
 
 async function api<T>(path: string, data?: unknown): Promise<T> {
@@ -74,6 +124,9 @@ export default function ForestGame() {
   const [quality, setQuality] = useState<"high" | "low">("high");
   const [nearChest, setNearChest] = useState<ChestId | null>(null);
   const [region, setRegion] = useState("Clareira dos começos");
+  const seenRef = useRef(new Uint8Array(WORLD.width * WORLD.height));
+  const [trailStamp, setTrailStamp] = useState(0);
+  const pose = useCallback(() => engine.current?.pose() ?? null, []);
   const [discoveries, setDiscoveries] = useState<Discovery[]>([]);
   const [gift, setGift] = useState<Discovery | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -94,6 +147,26 @@ export default function ForestGame() {
         onNearCampfire: setNearCampfire, onCampfire: id => campfireRef.current(id),
         onHazard: (hazard) => setNotice(hazard === "river" ? "A água te levou. Você acorda na última fogueira, com a mochila intacta." : "As raízes te prenderam. Você acorda na última fogueira, com a mochila intacta."),
         onReady: () => setReady(true), onNearChest: setNearChest, onRegion: setRegion,
+        onExplore: ({ x, z }) => {
+          const seen = seenRef.current;
+          const { width, height, grid } = WORLD;
+          const local = new Uint8Array(width * height);
+          const queue: Array<[number, number, number]> = [[x, z, 0]];
+          let fresh = false;
+          while (queue.length) {
+            const step = queue.shift();
+            if (!step) break;
+            const [cx, cz, dist] = step;
+            if (cx < 0 || cz < 0 || cx >= width || cz >= height) continue;
+            const index = cz * width + cx;
+            if (local[index] || grid[cz][cx] !== 0) continue;
+            local[index] = 1;
+            if (!seen[index]) { seen[index] = 1; fresh = true; }
+            if (dist >= LAMP) continue;
+            queue.push([cx + 1, cz, dist + 1], [cx - 1, cz, dist + 1], [cx, cz + 1, dist + 1], [cx, cz - 1, dist + 1]);
+          }
+          if (fresh) setTrailStamp((value) => value + 1);
+        },
         onInteract: (id) => claimRef.current(id),
         onPause: () => { if (hasStartedRef.current && !busyRef.current) setPanel((current) => current ?? "pause"); },
       });
@@ -295,6 +368,7 @@ export default function ForestGame() {
       </footer>
     </>}
     {started && <div className="game-hud">
+      <TrailMap seen={seenRef.current} stamp={trailStamp} pose={pose} />
       <div className="hud-top">
         <div className="hud-region">
           <FairyMark size={28} />

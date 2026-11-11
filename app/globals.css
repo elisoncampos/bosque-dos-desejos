@@ -1021,6 +1021,63 @@ kbd {
   color: #416c4b55;
 }
 
+.trail-map {
+  position: absolute;
+  left: 22px;
+  bottom: 78px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  pointer-events: none;
+  background: linear-gradient(180deg, #243f30e6, #15281fe6);
+  border: 1px solid #d8c48a55;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px #0a181244;
+}
+.trail-map small {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--cream);
+}
+.trail-board {
+  position: relative;
+  overflow: hidden;
+  line-height: 0;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px #d8c48a33;
+}
+.trail-map canvas {
+  display: block;
+  width: 140px;
+  height: 140px;
+  background: #0e1c16;
+}
+.trail-you {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--cream);
+  border: 2px solid #14261c;
+  box-shadow: 0 0 0 2px var(--gold), 0 0 10px #f0d878;
+  z-index: 2;
+}
+.trail-you::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 2px);
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 8px solid var(--gold-soft);
+  filter: drop-shadow(0 -1px 0 #14261c);
+}
+
 .hotbar {
   position: absolute;
   left: 50%;
@@ -1091,6 +1148,8 @@ kbd {
 .hidden { display: none !important; }
 
 @media (max-width: 980px) {
+  .trail-map { bottom: 136px; }
+  .trail-map canvas { width: 112px; height: 112px; }
   .hotbar { gap: 4px; padding: 4px; bottom: 72px; }
   .hotbar-slot { width: 46px; min-height: 50px; padding: 14px 2px 4px; }
   .hotbar-slot span { display: none; }
@@ -1121,6 +1180,8 @@ kbd {
   .hud-region > svg { display: none; }
   .hud-bottom { left: 14px; right: 14px; }
   .hud-hint { display: none; }
+  .trail-map { left: 12px; bottom: 128px; padding: 6px; }
+  .trail-map canvas { width: 96px; height: 96px; }
   .hud-actions .hud-button span { display: none; }
   .hotbar { bottom: 74px; gap: 3px; padding: 3px; width: calc(100% - 16px); }
   .hotbar-slot {
