@@ -115,6 +115,59 @@ export class ForestSound {
     [523.251, 659.255, 783.991, 1046.502, 1318.51].forEach((frequency, i) => this.tone(frequency, 2.5, 0.13, i * 0.13));
   }
 
+  /** Soft UI chime for menus — works even before ambient bed is enabled. */
+  ui(kind: "open" | "select" | "close" = "select") {
+    if (this.destroyed) return;
+    if (!this.context) this.initialize();
+    const context = this.context;
+    if (!context) return;
+    void context.resume().catch(() => undefined);
+    const chords = {
+      open: [523.25, 659.25, 783.99],
+      select: [698.46, 880],
+      close: [659.25, 523.25],
+    } as const;
+    chords[kind].forEach((frequency, i) => this.tone(frequency, 0.55, kind === "open" ? 0.05 : 0.035, i * 0.05));
+  }
+
+  chop() {
+    if (this.destroyed) return;
+    if (!this.context) this.initialize();
+    const context = this.context;
+    if (!context) return;
+    void context.resume().catch(() => undefined);
+    const now = context.currentTime;
+    const length = Math.floor(context.sampleRate * 0.16);
+    const buffer = context.createBuffer(1, length, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 1.6;
+    const noise = context.createBufferSource();
+    noise.buffer = buffer;
+    const crack = context.createBiquadFilter();
+    crack.type = "bandpass";
+    crack.frequency.setValueAtTime(1800, now);
+    crack.frequency.exponentialRampToValueAtTime(420, now + 0.12);
+    crack.Q.value = 0.6;
+    const noiseGain = context.createGain();
+    noiseGain.gain.setValueAtTime(0.72, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+    noise.connect(crack).connect(noiseGain).connect(context.destination);
+    noise.start(now);
+    noise.stop(now + 0.16);
+    const thud = context.createOscillator();
+    thud.type = "triangle";
+    thud.frequency.setValueAtTime(210, now);
+    thud.frequency.exponentialRampToValueAtTime(48, now + 0.16);
+    const thudGain = context.createGain();
+    thudGain.gain.setValueAtTime(0.46, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    thud.connect(thudGain).connect(context.destination);
+    thud.start(now);
+    thud.stop(now + 0.22);
+    noise.onended = () => { noise.disconnect(); crack.disconnect(); noiseGain.disconnect(); };
+    thud.onended = () => { thud.disconnect(); thudGain.disconnect(); };
+  }
+
   destroy() {
     this.destroyed = true;
     if (this.interval) clearInterval(this.interval);

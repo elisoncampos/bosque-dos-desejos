@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PUZZLES, type PuzzleAction } from '@/lib/puzzles';
+import { PUZZLES } from '@/lib/puzzles';
 export function createPuzzleScenery(scene: THREE.Scene) {
   const root=new THREE.Group();scene.add(root);
   const resources:Array<THREE.BufferGeometry|THREE.Material>=[];

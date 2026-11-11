@@ -21,6 +21,7 @@ export type ForestCallbacks = {
 export type ForestController = {
   setPlaying: (playing: boolean) => void;
   setSound: (enabled: boolean) => void;
+  playUi: (kind?: "open" | "select" | "close") => void;
   setQuality: (quality: "high" | "low") => void;
   interact: () => void;
   tryUse: (id: PuzzleAction) => boolean;
@@ -30,6 +31,7 @@ export type ForestController = {
   wakeAt: (x: number, z: number) => void;
   setPuzzleState: (actions: string[]) => void;
   setCollected: (ids: string[]) => void;
+  setEquipped: (item: "axe" | null) => void;
   getPosition: () => ForestPosition;
 };
 type Instance = { position: THREE.Vector3; scale: THREE.Vector3; rotation?: THREE.Euler; color?: string };
@@ -461,6 +463,19 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   const startX = maze.start.x * maze.cellSize;
   const startZ = maze.start.z * maze.cellSize;
   camera.position.set(startX, 1.72, startZ);
+  const handWood = material("#c4a06a", { roughness: 0.62 });
+  const handIron = material("#e4ecee", { roughness: 0.28, metalness: 0.62 });
+  const handGrip = material("#6a4632", { roughness: 0.84 });
+  const axeHand = new THREE.Group();
+  axeHand.visible = false;
+  mesh(geom(new THREE.CylinderGeometry(0.02, 0.028, 0.58, 7)), handWood, axeHand, v(0, -0.02, 0));
+  const blade = mesh(geom(new THREE.BoxGeometry(0.26, 0.15, 0.03)), handIron, axeHand, v(0.05, 0.26, 0));
+  blade.rotation.z = -0.18;
+  mesh(geom(new THREE.BoxGeometry(0.07, 0.09, 0.045)), handGrip, axeHand, v(-0.04, 0.24, 0));
+  camera.add(axeHand);
+  scene.add(camera);
+  let equipped: "axe" | null = null;
+  let swingT = -1;
   const position = (): ForestPosition => ({ x: camera.position.x, z: camera.position.z, steps: Math.round(travel / 0.72), elapsed: Math.floor(elapsed) });
   function resize() {
     const width = Math.max(container.clientWidth, 1);
@@ -519,9 +534,16 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
     yaw -= event.movementX * 0.0021;
     pitch = THREE.MathUtils.clamp(pitch - event.movementY * 0.0021, -1.25, 1.25);
   }
+  function swingAxe() {
+    if (!playing || equipped !== "axe") return;
+    if (swingT >= 0 && swingT < 0.58) return;
+    swingT = 0;
+    sound.chop();
+  }
   function onMouseDown(event: MouseEvent) {
     if (!playing || event.button !== 0) return;
     dragging = true;
+    swingAxe();
   }
   function onMouseUp() { dragging = false; }
   function onBlur() {
@@ -568,6 +590,14 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
         camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.72 + Math.sin(travel * 3.2) * 0.025, 0.25);
       } else camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.72, 0.07);
       camera.rotation.set(pitch, yaw, 0, "YXZ");
+      if (swingT >= 0) {
+        swingT += dt / 0.4;
+        if (swingT >= 1) swingT = -1;
+      }
+      const strike = swingT < 0 ? 0 : swingT < 0.22 ? -swingT / 0.22 : swingT < 0.42 ? -1 + ((swingT - 0.22) / 0.2) * 2.2 : Math.max(0, 1.2 * (1 - (swingT - 0.42) / 0.58));
+      axeHand.visible = equipped === "axe";
+      axeHand.rotation.set(0.2 - strike * 1.2, 0.35, -0.8 - Math.max(0, strike) * 0.3);
+      axeHand.position.set(0.46 - Math.max(0, strike) * 0.16, -0.36 + Math.sin(travel * 3.2) * 0.012 + Math.min(0, strike) * 0.06, -0.58);
       if (time - lastMove > 4) { callbacks.onMove?.(position()); lastMove = time; }
       if (time - lastProximity > 0.15) {
         lastProximity = time;
@@ -616,6 +646,7 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       chest.light.intensity = chest.opened ? 1 : 3.5 + Math.sin(time * 2) * 0.6;
     }
     puzzleScenery.update(time, dt);
+    axeHand.visible = equipped === "axe" && playing;
     renderer.render(scene, camera);
   };
   animate();
@@ -626,6 +657,7 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
     setPlaying,
     setPuzzleState(actions) { puzzleActions.clear(); actions.forEach(a=>puzzleActions.add(a)); puzzleScenery.setState(actions); nearObject=null; callbacks.onNearObject?.(null); },
     setSound(enabled) { soundEnabled = enabled; if (playing || !enabled) sound.setEnabled(enabled); },
+    playUi(kind = "select") { if (soundEnabled) sound.ui(kind); },
     setQuality(quality) {
       renderer.setPixelRatio(quality === "high" ? Math.min(window.devicePixelRatio || 1, 1.65) : 1);
       renderer.shadowMap.enabled = quality === "high";
@@ -634,6 +666,7 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       resize();
     },
     interact,
+    setEquipped(item) { equipped = item; if (item !== "axe") swingT = -1; axeHand.visible = item === "axe" && playing; },
     tryUse(id) {
       if (!playing || puzzleActions.has(id)) return false;
       const spot = PUZZLES.positions[id];

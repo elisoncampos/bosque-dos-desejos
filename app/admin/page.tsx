@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   ArrowLeft, ArrowUpRight, Check, CircleAlert, Compass, Flower2, Gift,
   Leaf, LoaderCircle, LockKeyhole, LogOut, Mail, RefreshCw,
@@ -100,7 +101,8 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [refresh]);
 
   useEffect(() => {
@@ -158,13 +160,13 @@ export default function AdminPage() {
   return (
     <main className="admin-page">
       <header className="admin-header">
-        <a href="/" className="admin-brand" aria-label="Bosque dos Desejos — início">
+        <Link href="/" className="admin-brand" aria-label="Bosque dos Desejos — início">
           <span className="admin-brand-icon"><TreePine size={22} strokeWidth={1.5} /></span>
           <span>Bosque dos Desejos<small>UM MUNDO FEITO PARA JÚLIA</small></span>
-        </a>
+        </Link>
         <div className="admin-header-actions">
           <span className="admin-private"><ShieldCheck size={14} /> Área reservada</span>
-          <a href="/" className="admin-back"><ArrowLeft size={15} /> Voltar ao bosque</a>
+          <Link href="/" className="admin-back"><ArrowLeft size={15} /> Voltar ao bosque</Link>
           {state === "ready" && <button className="admin-logout" onClick={logout} disabled={busy} aria-label="Sair da área administrativa"><LogOut size={17} /></button>}
         </div>
       </header>
@@ -248,7 +250,7 @@ export default function AdminPage() {
             })}</tbody></table></div> : <div className="admin-empty"><div><Gift size={31} strokeWidth={1.2} /></div><h3>{filter === "all" ? "O primeiro segredo ainda está guardado." : "Este segredo ainda está guardado."}</h3><p>Assim que um baú for encontrado, a descoberta aparecerá aqui.</p><span><span /> ACOMPANHANDO O BOSQUE</span></div>}
             <div className="admin-log-footer"><span><span className="admin-live-dot" /> Atualização automática a cada 20 segundos</span><span>{updatedAt ? `Última atualização às ${updatedAt.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Aguardando atualização"} · Brasília</span></div>
           </section>
-          <footer className="admin-footer"><span><TreePine size={15} strokeWidth={1.4} /> Feito de carinho. Guardado com cuidado.</span><a href="/">De volta à magia <ArrowUpRight size={13} /></a></footer>
+          <footer className="admin-footer"><span><TreePine size={15} strokeWidth={1.4} /> Feito de carinho. Guardado com cuidado.</span><Link href="/">De volta à magia <ArrowUpRight size={13} /></Link></footer>
         </div>
       )}
     </main>
