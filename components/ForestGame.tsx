@@ -43,9 +43,15 @@ export default function ForestGame() {
   const claimRef = useRef<(id: ChestId) => void>(() => {});
   const busyRef = useRef(false);
   const puzzleRef = useRef<(id: PuzzleAction) => void>(() => {});
+  const campfireRef = useRef<(id: string) => void>(() => {});
+  const selectSlotRef = useRef<(index: number) => void>(() => {});
+  const toggleSoundRef = useRef(() => {});
+  const checkpointRef = useRef<{ x: number; z: number } | null>(null);
   const actionsRef = useRef<PuzzleAction[]>([]);
   const [actions, setActions] = useState<PuzzleAction[]>([]);
   const [nearObject, setNearObject] = useState<PuzzleTarget | null>(null);
+  const [nearCampfire, setNearCampfire] = useState<PuzzleTarget | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState(0);
   const [notice, setNotice] = useState("");
   const hasStartedRef = useRef(false);
   const collectedRef = useRef<Discovery[]>([]);
@@ -70,6 +76,8 @@ export default function ForestGame() {
       if (disposed || !container.current) return;
       engine.current = createForest(container.current, {
         onNearObject: setNearObject, onPuzzle: id => puzzleRef.current(id),
+        onNearCampfire: setNearCampfire, onCampfire: id => campfireRef.current(id),
+        onHazard: (hazard) => setNotice(hazard === "river" ? "A água te levou. Você acorda na última fogueira, com a mochila intacta." : "As raízes te prenderam. Você acorda na última fogueira, com a mochila intacta."),
         onReady: () => setReady(true), onNearChest: setNearChest, onRegion: setRegion,
         onInteract: (id) => claimRef.current(id),
         onPause: () => { if (hasStartedRef.current && !busyRef.current) setPanel((current) => current ?? "pause"); },
@@ -77,9 +85,10 @@ export default function ForestGame() {
       engine.current.setCollected(collectedRef.current.map((d) => d.chestId));
       engine.current.setPuzzleState(actionsRef.current);
     }).catch(() => { if (!disposed) setRenderError(true); });
-    api<{ discoveries: Discovery[]; playerId: string | null }>("/api/game").then(async (data) => {
+    api<{ discoveries: Discovery[]; playerId: string | null; checkpoint: { x: number; z: number } | null }>("/api/game").then(async (data) => {
       const progress = await api<PuzzleState>("/api/puzzle");
       if (disposed) return;
+      checkpointRef.current = data.checkpoint;
       setDiscoveries(data.discoveries); collectedRef.current = data.discoveries;
       engine.current?.setCollected(data.discoveries.map((d) => d.chestId));
       actionsRef.current = progress.actions; setActions(progress.actions); engine.current?.setPuzzleState(progress.actions);
@@ -100,20 +109,30 @@ export default function ForestGame() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (event.code === "KeyJ" && started && !gift && !saving && !event.repeat) {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      if (!started || gift || saving || event.repeat) return;
+      if (event.code === "KeyJ") {
         engine.current?.setPlaying(false); setPanel((current) => current === "journal" ? "pause" : "journal");
+      }
+      if (panel) return;
+      if (event.code === "KeyM") { event.preventDefault(); toggleSoundRef.current(); }
+      if (event.code.startsWith("Digit")) {
+        const slot = Number(event.code.slice(5)) - 1;
+        if (slot >= 0 && slot < 9) { event.preventDefault(); selectSlotRef.current(slot); }
       }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [started, gift, saving]);
+  }, [started, gift, saving, panel]);
 
   const enter = async () => {
     if (!ready || connecting) return;
     if (!sessionReady) {
       setConnecting(true); setError("");
       try {
-        const result = await api<{ discoveries: Discovery[]; playerId: string }>("/api/game", { name: "Júlia" });
+        const result = await api<{ discoveries: Discovery[]; playerId: string; checkpoint: { x: number; z: number } | null }>("/api/game", { name: "Júlia" });
+        checkpointRef.current = result.checkpoint;
         setDiscoveries(result.discoveries); collectedRef.current = result.discoveries;
         engine.current?.setCollected(result.discoveries.map((d) => d.chestId));
         const progress = await api<PuzzleState>("/api/puzzle");
@@ -127,6 +146,8 @@ export default function ForestGame() {
   const begin = () => {
     if (!sessionReady) { void enter(); return; }
     hasStartedRef.current = true; setStarted(true); setPanel(null); setError("");
+    const saved = checkpointRef.current;
+    if (saved) engine.current?.wakeAt(saved.x, saved.z);
     engine.current?.setSound(sound);
     engine.current?.setPlaying(true);
   };
@@ -155,8 +176,29 @@ export default function ForestGame() {
     } catch(err) { setError(err instanceof Error ? err.message : "Não foi possível guardar o objeto. Tente novamente."); }
     finally { busyRef.current=false; }
   };
+  campfireRef.current = async (campfireId) => {
+    if (busyRef.current) return;
+    busyRef.current = true; setError("");
+    try {
+      const result = await api<{ checkpoint: { x: number; z: number }; message: string }>("/api/checkpoint", { campfireId, position: engine.current?.getPosition() });
+      checkpointRef.current = result.checkpoint;
+      engine.current?.setCheckpoint(result.checkpoint.x, result.checkpoint.z);
+      setNotice(result.message);
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível guardar o lugar. Tente novamente."); }
+    finally { busyRef.current = false; }
+  };
+  const held = actions.filter((id) => id in ITEM_NAMES);
+  const selectSlot = (index: number) => {
+    setSelectedSlot(index);
+    const item = held[index];
+    if (!item) return;
+    if (engine.current?.tryUse(item === "moonstone" ? "seal" : "bridge")) return;
+    setNotice(`${ITEM_NAMES[item]} em mãos.`);
+  };
+  selectSlotRef.current = selectSlot;
   useEffect(() => { if (!notice) return; const timer=setTimeout(()=>setNotice(""),5500); return ()=>clearTimeout(timer); },[notice]);
   const toggleSound = () => { const next = !sound; setSound(next); engine.current?.setSound(next); };
+  toggleSoundRef.current = toggleSound;
   const SoundIcon = sound ? Volume2 : VolumeX;
   const leave = () => { engine.current?.setPlaying(false); hasStartedRef.current = false; setStarted(false); setPanel(null); setGift(null); };
 
@@ -179,17 +221,23 @@ export default function ForestGame() {
         {renderError && <p className="error-banner">Não foi possível iniciar o cenário 3D. Use um navegador com WebGL e aceleração de hardware ativados.</p>}
         {error && <p className="error-banner" role="alert">{error}</p>}
       </section>
-      <div className="hero-side-note"><Sparkles size={22} strokeWidth={1} /><span>Um lugar fora do tempo.<br />Um carinho em cada caminho.</span></div>
+      <div className="hero-side-note"><Sparkles size={22} strokeWidth={1} /></div>
       {!ready && !renderError && <div className="loading-scene"><LoaderCircle className="spin" size={23} /><span>O bosque está despertando…</span></div>}
       <div className="scene-label"><span>01</span><i className="fine-rule" /><span>Clareira dos começos</span></div>
       <footer className="landing-footer"><span><Heart size={10} /> Feito com carinho, para você.</span><span>Vá com calma. A beleza está no caminho.</span><a href="/admin" aria-label="Painel do guardião">O guardião <ChevronRight size={9} style={{ display: "inline" }} /></a></footer>
     </>}
-    {started && <div className="game-hud"><div className="hud-top"><div className="hud-region"><Compass size={31} strokeWidth={1} /><div><small>Bosque dos Desejos</small><p>{region}</p></div></div><div className="hud-actions"><button className="hud-button" onClick={() => openPanel("journal")}><BookOpen size={16} /><span>Seu diário</span><kbd>J</kbd></button><button className="hud-button" onClick={toggleSound} aria-label={sound ? "Desativar som" : "Ativar som"}><SoundIcon size={16} /></button><button className="hud-button" onClick={() => openPanel("pause")} aria-label="Pausar jogo"><Pause size={16} /></button></div></div><span className="crosshair" />
+    {started && <div className="game-hud"><div className="hud-top"><div className="hud-region"><Compass size={31} strokeWidth={1} /><div><small>Bosque dos Desejos</small><p>{region}</p></div></div><div className="hud-actions"><button className="hud-button" onClick={() => openPanel("journal")}><BookOpen size={16} /><span>Seu diário</span><kbd>J</kbd></button><button className="hud-button" onClick={toggleSound} aria-label={sound ? "Desativar som" : "Ativar som"}><SoundIcon size={16} /><kbd>M</kbd></button><button className="hud-button" onClick={() => openPanel("pause")} aria-label="Pausar jogo"><Pause size={16} /></button></div></div><span className="crosshair" />
       {nearChest && !nearObject && !panel && !gift && !saving && <div className="near-chest"><span>O bosque guardou algo para você.</span><button className="interact-button" onClick={() => engine.current?.interact()}><kbd>E</kbd> Abrir o baú <Gift size={15} /></button></div>}
       {nearObject && !panel && !gift && !saving && <div className="near-chest"><span>{nearObject.message}</span><button className="interact-button" onClick={() => engine.current?.interact()}><kbd>E</kbd>{nearObject.label}</button></div>}
-      <div className="hud-bottom"><div className="hud-hint"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> caminhar &nbsp; · &nbsp; mouse para olhar</div><div><kbd>Shift</kbd> correr &nbsp; <kbd>Esc</kbd> respirar um pouco</div></div><button className="hud-button inventory-button" onClick={() => openPanel("journal")}><BookOpen size={15} /> Mochila {actions.filter(id=>id in ITEM_NAMES).length || ""}</button></div>
+      {nearCampfire && !nearObject && !nearChest && !panel && !gift && !saving && <div className="near-chest"><span>{nearCampfire.message}</span><button className="interact-button" onClick={() => engine.current?.interact()}><kbd>E</kbd>{nearCampfire.label}</button></div>}
+      <div className="hotbar" role="toolbar" aria-label="Mochila">{Array.from({ length: 9 }, (_, index) => {
+        const id = held[index];
+        const used = (id === "rope" && actions.includes("bridge")) || (id === "moonstone" && actions.includes("seal"));
+        return <button type="button" key={index} className={`hotbar-slot${selectedSlot === index ? " is-selected" : ""}${id ? "" : " is-empty"}${used ? " is-used" : ""}`} onClick={() => selectSlot(index)} aria-pressed={selectedSlot === index} aria-label={id ? `${ITEM_NAMES[id]}${used ? ", utilizado" : ""}, tecla ${index + 1}` : `Espaço ${index + 1}`}><kbd>{index + 1}</kbd>{id ? <><Gem size={15} /><span>{ITEM_NAMES[id]}</span>{used ? <small>utilizado</small> : null}</> : null}</button>;
+      })}</div>
+      <div className="hud-bottom"><div className="hud-hint"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> caminhar &nbsp; · &nbsp; arrastar para olhar</div><div><kbd>Shift</kbd> correr &nbsp; <kbd>Esc</kbd> respirar um pouco</div></div><button className="hud-button inventory-button" onClick={() => openPanel("journal")}><BookOpen size={15} /> Mochila {held.length || ""}</button></div>
     </div>}
-    {panel === "controls" && <Dialog label="Como explorar o bosque" onClose={closePanel}><div className="eyebrow dialog-eyebrow"><Leaf size={12} /> SIGA SUA CURIOSIDADE</div><h2>Sem pressa.<br />Sem caminho errado.</h2><p className="dialog-description">Explore em primeira pessoa. Observe os caminhos, recolha objetos e encontre um jeito de passar pelos obstáculos. O bosque guarda suas próprias surpresas.</p><div className="controls-list"><div className="control-row"><span>Caminhar pelo bosque</span><span className="control-keys">{"WASD".split("").map((k) => <kbd key={k}>{k}</kbd>)}</span></div><div className="control-row"><span>Olhar ao redor</span><span className="control-keys"><Mouse size={15} /> Mova o mouse</span></div><div className="control-row"><span>Recolher · examinar · abrir</span><span className="control-keys"><kbd>E</kbd></span></div><div className="control-row"><span>Correr · diário · pausar</span><span className="control-keys"><kbd>Shift</kbd><kbd>J</kbd><kbd>Esc</kbd></span></div></div><p className="dialog-description">Se o mouse não ficar preso ao jogo, clique e arraste para olhar. Os presentes encontrados ficam salvos neste navegador e registrados com o guardião.</p><button className="primary-button dialog-action" onClick={started ? resume : begin} disabled={!ready || connecting}>{connecting ? <LoaderCircle size={15} className="spin" /> : <Compass size={15} />}{started ? "Continuar explorando" : sessionReady ? "Que a aventura comece" : "Preparar minha aventura"}<ArrowRight size={15} /></button>{error && <p className="error-banner" role="alert">{error}</p>}</Dialog>}
+    {panel === "controls" && <Dialog label="Como explorar o bosque" onClose={closePanel}><div className="eyebrow dialog-eyebrow"><Leaf size={12} /> SIGA SUA CURIOSIDADE</div><h2>Sem pressa.<br />Sem caminho errado.</h2><p className="dialog-description">Explore em primeira pessoa. Observe os caminhos, recolha objetos e encontre um jeito de passar pelos obstáculos. O bosque guarda suas próprias surpresas.</p><div className="controls-list"><div className="control-row"><span>Caminhar pelo bosque</span><span className="control-keys">{"WASD".split("").map((k) => <kbd key={k}>{k}</kbd>)}</span></div><div className="control-row"><span>Olhar ao redor</span><span className="control-keys"><Mouse size={15} /> Clique e arraste</span></div><div className="control-row"><span>Recolher · examinar · abrir</span><span className="control-keys"><kbd>E</kbd></span></div><div className="control-row"><span>Escolher um item da mochila</span><span className="control-keys"><kbd>1</kbd>–<kbd>9</kbd></span></div><div className="control-row"><span>Som da floresta</span><span className="control-keys"><kbd>M</kbd></span></div><div className="control-row"><span>Correr · diário · pausar</span><span className="control-keys"><kbd>Shift</kbd><kbd>J</kbd><kbd>Esc</kbd></span></div></div><p className="dialog-description">As fogueiras guardam o lugar: cair na água ou nas raízes te acorda na última. Os presentes encontrados ficam salvos neste navegador e registrados com o guardião.</p><button className="primary-button dialog-action" onClick={started ? resume : begin} disabled={!ready || connecting}>{connecting ? <LoaderCircle size={15} className="spin" /> : <Compass size={15} />}{started ? "Continuar explorando" : sessionReady ? "Que a aventura comece" : "Preparar minha aventura"}<ArrowRight size={15} /></button>{error && <p className="error-banner" role="alert">{error}</p>}</Dialog>}
     {panel === "journal" && <Dialog label="Sua mochila e diário" className="journal-dialog" onClose={closePanel}>
       <div className="journal-heading"><div className="journal-mark"><BookOpen size={23} strokeWidth={1.3} /></div><div><span className="eyebrow">O QUE VEIO PELO CAMINHO</span><h2>Sua mochila, Júlia.</h2></div></div>
       <div className="inventory-list">{actions.filter(id=>id in ITEM_NAMES).length ? actions.filter(id=>id in ITEM_NAMES).map(id=><span className="inventory-item" key={id}><Gem size={15} />{ITEM_NAMES[id]}{(id==='rope' && actions.includes('bridge')) || (id==='moonstone' && actions.includes('seal')) ? <small>utilizado</small> : null}</span>) : <p className="dialog-description">Sua mochila está vazia. Objetos encontrados na floresta podem abrir novos caminhos.</p>}</div>

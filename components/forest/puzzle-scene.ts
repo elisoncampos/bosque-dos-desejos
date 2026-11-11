@@ -44,6 +44,16 @@ export function createPuzzleScenery(scene: THREE.Scene) {
   add(new THREE.CylinderGeometry(.6,.85,.85,6),rock,altar,1.6,.425,0);
   const rune=add(new THREE.TorusGeometry(.3,.065,7,24,Math.PI*1.6),magic,altar,1.6,1,0);rune.rotation.x=-Math.PI/2;
   const installed=add(new THREE.OctahedronGeometry(.23),magic,altar,1.6,1.2,0);installed.visible=false;
+  const ember=mat('#ffb15a','#ff7a1a');
+  const flames:THREE.Mesh[]=[];
+  for(const campfire of PUZZLES.campfires){
+    const group=new THREE.Group();group.position.set(campfire.x,0,campfire.z);root.add(group);
+    for(let i=0;i<6;i++){const stone=add(new THREE.IcosahedronGeometry(.28,0),rock,group,Math.cos(i)*0.78,.12,Math.sin(i)*0.78);stone.scale.set(1.15,.5,.85);}
+    const logA=add(new THREE.CylinderGeometry(.07,.09,.95,6),bark,group,.12,.18,.04);logA.rotation.z=1.15;
+    const logB=add(new THREE.CylinderGeometry(.07,.09,.95,6),bark,group,-.08,.18,-.02);logB.rotation.z=-.7;logB.rotation.y=.4;
+    flames.push(add(new THREE.ConeGeometry(.26,.72,6),ember,group,0,.62,0));
+    const glow=new THREE.PointLight('#ff9a3c',5.5,9,2);glow.position.y=.9;group.add(glow);
+  }
   let completed=new Set<string>();let first=true;
   function setState(actions:readonly string[]){completed=new Set(actions);for(const [id,item] of pickups)item.visible=!completed.has(id);bindings.visible=completed.has('bridge');installed.visible=completed.has('seal');if(first){fallenTree.rotation.x=completed.has('bridge')?Math.PI/2:0;curtain.scale.y=completed.has('seal')?.025:1;first=false;}}
   function update(time:number,dt:number){
@@ -52,6 +62,7 @@ export function createPuzzleScenery(scene: THREE.Scene) {
     curtain.scale.y=THREE.MathUtils.damp(curtain.scale.y,completed.has('seal')?.025:1,2.3,dt);
     for(let i=0;i<ripples.length;i++)ripples[i].position.x=((time*.7+i*1.37)%18)-9;
     for(const [id,item] of pickups){if(id==='moonstone')item.rotation.y=time*.6;item.position.y=.8+Math.sin(time*1.4)*.05;}
+    flames.forEach((flame,index)=>{flame.scale.y=.82+Math.sin(time*7.5+index)*.2;flame.scale.x=flame.scale.z=.9+Math.sin(time*5+index)*.08;});
   }
   return {setState,update,destroy(){scene.remove(root);resources.forEach(r=>r.dispose());}};
 }

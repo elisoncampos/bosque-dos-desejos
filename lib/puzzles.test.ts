@@ -41,6 +41,7 @@ test("campfires are places you can stand, and the later one is not the same as t
     const column = Math.round(campfire.x / maze.cellSize);
     const row = Math.round(campfire.z / maze.cellSize);
     assert.equal(maze.grid[row][column], 0, campfire.id);
+    assert.equal(puzzleHazard(maze, campfire.x, campfire.z, []), null, campfire.id);
   }
   assert.notEqual(`${fork.x}:${fork.z}`, `${ridge.x}:${ridge.z}`);
   assert.ok(hearth.z > fork.z || hearth.x !== fork.x);

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { canWalk, createMaze, seededRandom, type ChestId } from "@/lib/maze";
 import { ForestSound } from "./sound";
-import { ACTION_IDS, PUZZLES, puzzleTarget, puzzleCanWalk, type PuzzleAction, type PuzzleTarget } from "@/lib/puzzles";
+import { ACTION_IDS, PUZZLES, campfireNear, puzzleHazard, puzzleTarget, type PuzzleAction, type PuzzleTarget } from "@/lib/puzzles";
 import { createPuzzleScenery } from "./puzzle-scene";
 
 export type ForestPosition = { x: number; z: number; steps: number; elapsed: number };
@@ -10,6 +10,9 @@ export type ForestCallbacks = {
   onPuzzle?: (action: PuzzleAction) => void;
   onNearChest?: (id: ChestId | null) => void;
   onInteract?: (id: ChestId) => void;
+  onNearCampfire?: (target: PuzzleTarget | null) => void;
+  onCampfire?: (id: string) => void;
+  onHazard?: (hazard: "river" | "vines") => void;
   onPause?: () => void;
   onReady?: () => void;
   onRegion?: (name: string) => void;
@@ -20,8 +23,11 @@ export type ForestController = {
   setSound: (enabled: boolean) => void;
   setQuality: (quality: "high" | "low") => void;
   interact: () => void;
+  tryUse: (id: PuzzleAction) => boolean;
   destroy: () => void;
   teleportToStart: () => void;
+  setCheckpoint: (x: number, z: number) => void;
+  wakeAt: (x: number, z: number) => void;
   setPuzzleState: (actions: string[]) => void;
   setCollected: (ids: string[]) => void;
   getPosition: () => ForestPosition;
@@ -50,7 +56,12 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   container.appendChild(renderer.domElement);
   const puzzleScenery = createPuzzleScenery(scene);
   const puzzleActions = new Set<string>();
+  const hearth = PUZZLES.campfires[0];
+  let checkpointX = hearth.x;
+  let checkpointZ = hearth.z;
+  let suppressHazardUntil = 0;
   let nearObject: PuzzleAction | null = null;
+  let nearCampfire: string | null = null;
   const clock = new THREE.Clock();
   const sound = new ForestSound();
   const disposable: Array<THREE.BufferGeometry | THREE.Material | THREE.Texture> = [];
@@ -445,7 +456,6 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   let nearChest: ChestId | null = null;
   let frame = 0;
   let animation = 0;
-  let suppressUnlockPause = false;
   const keys = new Set<string>();
   const collected = new Set<string>();
   const startX = maze.start.x * maze.cellSize;
@@ -463,13 +473,6 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   observer.observe(container);
   resize();
 
-  function lockPointer() {
-    if (document.pointerLockElement === renderer.domElement) return;
-    try {
-      const result = renderer.domElement.requestPointerLock();
-      if (result) result.catch(() => undefined);
-    } catch { /* Drag-to-look remains available when an iframe disallows pointer lock. */ }
-  }
   function setPlaying(value: boolean) {
     if (destroyed) return;
     playing = value;
@@ -478,11 +481,7 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
     if (value) {
       hasPlayed = true;
       renderer.domElement.focus({ preventScroll: true });
-      lockPointer();
       if (soundEnabled) sound.setEnabled(true);
-    } else if (document.pointerLockElement === renderer.domElement) {
-      suppressUnlockPause = true;
-      document.exitPointerLock();
     }
   }
   function interact() {
@@ -490,6 +489,10 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
     if (nearObject) {
       const p = PUZZLES.positions[nearObject];
       if (Math.hypot(camera.position.x-p.x,camera.position.z-p.z) < 3.4) { callbacks.onPuzzle?.(nearObject); return; }
+    }
+    if (nearCampfire) {
+      const campfire = PUZZLES.campfires.find((item) => item.id === nearCampfire);
+      if (campfire && Math.hypot(camera.position.x - campfire.x, camera.position.z - campfire.z) <= 4) { callbacks.onCampfire?.(campfire.id); return; }
     }
     if (!nearChest || collected.has(nearChest)) return;
     const chest = chestObjects.find((entry) => entry.id === nearChest);
@@ -512,25 +515,15 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   }
   function onKeyUp(event: KeyboardEvent) { keys.delete(event.code); }
   function onMouseMove(event: MouseEvent) {
-    if (!playing || (document.pointerLockElement !== renderer.domElement && !dragging)) return;
+    if (!playing || !dragging) return;
     yaw -= event.movementX * 0.0021;
     pitch = THREE.MathUtils.clamp(pitch - event.movementY * 0.0021, -1.25, 1.25);
   }
   function onMouseDown(event: MouseEvent) {
     if (!playing || event.button !== 0) return;
     dragging = true;
-    lockPointer();
   }
   function onMouseUp() { dragging = false; }
-  function onPointerLockChange() {
-    if (document.pointerLockElement === renderer.domElement) return;
-    if (suppressUnlockPause) { suppressUnlockPause = false; return; }
-    if (playing) {
-      playing = false;
-      keys.clear();
-      callbacks.onPause?.();
-    }
-  }
   function onBlur() {
     keys.clear();
     if (playing) { setPlaying(false); callbacks.onPause?.(); }
@@ -542,7 +535,6 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
   window.addEventListener("mouseup", onMouseUp);
   window.addEventListener("blur", onBlur);
   renderer.domElement.addEventListener("mousedown", onMouseDown);
-  document.addEventListener("pointerlockchange", onPointerLockChange);
   document.addEventListener("visibilitychange", onVisibility);
 
   const animate = () => {
@@ -564,8 +556,14 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
         const dz = (-forward * Math.cos(yaw) - strafe * Math.sin(yaw)) * speed * dt;
         const beforeX = camera.position.x;
         const beforeZ = camera.position.z;
-        if (puzzleCanWalk(maze, camera.position.x + dx, camera.position.z, [...puzzleActions])) camera.position.x += dx;
-        if (puzzleCanWalk(maze, camera.position.x, camera.position.z + dz, [...puzzleActions])) camera.position.z += dz;
+        if (canWalk(maze, camera.position.x + dx, camera.position.z)) camera.position.x += dx;
+        if (canWalk(maze, camera.position.x, camera.position.z + dz)) camera.position.z += dz;
+        const hazard = performance.now() < suppressHazardUntil ? null : puzzleHazard(maze, camera.position.x, camera.position.z, [...puzzleActions]);
+        if (hazard) {
+          camera.position.set(checkpointX, 1.72, checkpointZ);
+          suppressHazardUntil = performance.now() + 1600;
+          callbacks.onHazard?.(hazard);
+        }
         travel += Math.hypot(camera.position.x - beforeX, camera.position.z - beforeZ);
         camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.72 + Math.sin(travel * 3.2) * 0.025, 0.25);
       } else camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.72, 0.07);
@@ -575,6 +573,9 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
         lastProximity = time;
         const object = ACTION_IDS.find(id => !puzzleActions.has(id) && Math.hypot(camera.position.x-PUZZLES.positions[id].x,camera.position.z-PUZZLES.positions[id].z)<3.4) ?? null;
         if (object !== nearObject) { nearObject = object; callbacks.onNearObject?.(object ? puzzleTarget(object,[...puzzleActions]) : null); }
+        const campfire = campfireNear(camera.position.x, camera.position.z);
+        const campfireId = campfire?.id ?? null;
+        if (campfireId !== nearCampfire) { nearCampfire = campfireId; callbacks.onNearCampfire?.(campfire ? puzzleTarget(campfire.id, [...puzzleActions]) : null); }
         const closest = chestObjects.find((chest) => !collected.has(chest.id) && Math.hypot(camera.position.x - chest.group.position.x, camera.position.z - chest.group.position.z) < 3.4);
         const id = closest?.id ?? null;
         if (id !== nearChest) { nearChest = id; callbacks.onNearChest?.(id); }
@@ -633,14 +634,33 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       resize();
     },
     interact,
+    tryUse(id) {
+      if (!playing || puzzleActions.has(id)) return false;
+      const spot = PUZZLES.positions[id];
+      if (Math.hypot(camera.position.x - spot.x, camera.position.z - spot.z) >= 3.4) return false;
+      callbacks.onPuzzle?.(id);
+      return true;
+    },
     getPosition: position,
     teleportToStart() {
       camera.position.set(startX, 1.72, startZ);
+      suppressHazardUntil = performance.now() + 1600;
       yaw = 0;
       pitch = 0.025;
       nearChest = null;
       callbacks.onNearChest?.(null);
       callbacks.onRegion?.("Clareira dos começos");
+      callbacks.onMove?.(position());
+    },
+    setCheckpoint(x, z) {
+      if (Number.isFinite(x) && Number.isFinite(z)) { checkpointX = x; checkpointZ = z; }
+    },
+    wakeAt(x, z) {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+      checkpointX = x;
+      checkpointZ = z;
+      camera.position.set(x, 1.72, z);
+      suppressHazardUntil = performance.now() + 1600;
       callbacks.onMove?.(position());
     },
     setCollected(ids) {
@@ -655,7 +675,6 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       destroyed = true;
       playing = false;
       cancelAnimationFrame(animation);
-      if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
       observer.disconnect();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -663,7 +682,6 @@ export function createForest(container: HTMLElement, callbacks: ForestCallbacks 
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("blur", onBlur);
       renderer.domElement.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("pointerlockchange", onPointerLockChange);
       document.removeEventListener("visibilitychange", onVisibility);
       sound.destroy();
       puzzleScenery.destroy();
