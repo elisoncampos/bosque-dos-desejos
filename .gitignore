@@ -31,6 +31,9 @@ yarn-error.log*
 .dev.vars*
 *.pem
 
+# Local SQLite used when TURSO_DATABASE_URL is empty
+/.data/
+
 # Checkout-local tool state
 /.wrangler/
 /.sites-runtime/

@@ -51,6 +51,22 @@ export function createMaze(seed = 351107): Maze {
     stack.push(next);
   }
 
+  // Extra openings turn the single route into forks: two ways forward, and long branches that still end.
+  const forks: MazeCell[] = [];
+  for (let z = 2; z <= 30; z++) {
+    for (let x = 2; x < width - 2; x++) {
+      if (grid[z][x] !== 1) continue;
+      const vertical = grid[z - 1][x] === 0 && grid[z + 1][x] === 0;
+      const horizontal = grid[z][x - 1] === 0 && grid[z][x + 1] === 0;
+      if (vertical !== horizontal) forks.push({ x, z });
+    }
+  }
+  for (let i = forks.length - 1; i > 0; i--) {
+    const swap = Math.floor(random() * (i + 1));
+    [forks[i], forks[swap]] = [forks[swap], forks[i]];
+  }
+  for (const cell of forks.slice(0, 18)) grid[cell.z][cell.x] = 0;
+
   // A broad, safe meadow gives the player space to learn the controls.
   for (let z = 33; z <= 37; z++) for (let x = 15; x <= 23; x++) grid[z][x] = 0;
   grid[32][19] = 0;

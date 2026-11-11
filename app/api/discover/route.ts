@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { discoveries, players } from "@/db/schema";
+import { discoveries, players, puzzleEvents } from "@/db/schema";
 import { GIFTS, isChestId, isNearChest, publicDiscovery } from "@/lib/server/gifts";
 import { ApiError, assertMutation, body, database, handle, json, rateLimit, requireSession } from "@/lib/server/http";
 import { emailConfigured, notifyDiscovery } from "@/lib/server/notifications";
@@ -17,6 +17,11 @@ export function POST(request: Request) {
     if (!isChestId(data.chestId)) throw new ApiError(400, "invalid_chest", "Este baú não faz parte do bosque.");
     if (!isNearChest(data.chestId, data.position)) throw new ApiError(400, "too_far", "Aproxime-se do baú para abrir seu presente.");
     const chestId = data.chestId;
+    const required = chestId === "wish" ? "bridge" : chestId === "creation" ? "seal" : null;
+    if (required) {
+      const progress = await db.select().from(puzzleEvents).where(eq(puzzleEvents.playerId, session.playerId));
+      if (!progress.some(row => row.action === required)) throw new ApiError(403, "puzzle_locked", "Ainda há um obstáculo entre você e este baú.");
+    }
     if (chestId === "horizon") {
       const found = await db.select({ chestId: discoveries.chestId }).from(discoveries).where(eq(discoveries.playerId, session.playerId));
       if (["ember", "feast", "wish", "creation"].some((id) => !found.some((item) => item.chestId === id))) {

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Bosque dos Desejos · Para Júlia",
-  description: "Uma floresta encantada. Cinco segredos. Uma aventura feita para você.",
+  description: "Uma floresta encantada. Uma aventura feita para você.",
   robots: { index: false, follow: false },
   icons: {
     icon: "/favicon.svg",

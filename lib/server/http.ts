@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { getDb, type Database } from "@/db";
 import { rateLimits, sessions } from "@/db/schema";
@@ -6,9 +5,17 @@ import { cookieValue, digest, sameOrigin, signSession, verifySession, type Sessi
 
 type SecretName = "SESSION_SECRET" | "ADMIN_PASSWORD" | "RESEND_API_KEY" | "RESEND_FROM" | "NOTIFY_EMAIL" | "APP_ORIGIN";
 
+const settings = {
+  SESSION_SECRET: process.env.SESSION_SECRET ?? "",
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ?? "",
+  RESEND_API_KEY: process.env.RESEND_API_KEY ?? "",
+  RESEND_FROM: process.env.RESEND_FROM ?? "",
+  NOTIFY_EMAIL: process.env.NOTIFY_EMAIL ?? "",
+  APP_ORIGIN: process.env.APP_ORIGIN ?? "",
+} satisfies Record<SecretName, string>;
+
 export function setting(name: SecretName) {
-  const value = (env as unknown as Record<string, unknown>)[name] ?? process.env[name];
-  return typeof value === "string" ? value : "";
+  return settings[name];
 }
 
 export class ApiError extends Error {
@@ -55,8 +62,11 @@ export async function body(request: Request): Promise<Record<string, unknown>> {
 
 export async function database() {
   sessionSecret();
-  try { return getDb(); }
-  catch { throw new ApiError(503, "database_unavailable", "O banco de dados do bosque ainda não está disponível."); }
+  try { return await getDb(); }
+  catch (error) {
+    console.error("Bosque database unavailable", error instanceof Error ? error.message : "Unknown error");
+    throw new ApiError(503, "database_unavailable", "O banco de dados do bosque ainda não está disponível.");
+  }
 }
 
 export const COOKIE_NAMES = { player: "bosque_player", admin: "bosque_admin" } as const;
@@ -96,7 +106,7 @@ export async function rateLimit(request: Request, db: Database, action: string, 
   const now = Date.now();
   const windowMs = windowSeconds * 1000;
   const window = Math.floor(now / windowMs);
-  const identity = request.headers.get("cf-connecting-ip") || "local-or-shared";
+  const identity = request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("cf-connecting-ip") || "local-or-shared";
   const id = await digest(sessionSecret(), `${action}:${identity}:${window}`);
   const expiresAt = (window + 1) * windowMs;
   const [entry] = await db.insert(rateLimits).values({ id, attempts: 1, expiresAt }).onConflictDoUpdate({ target: rateLimits.id, set: { attempts: sql`${rateLimits.attempts} + 1` } }).returning({ attempts: rateLimits.attempts });

@@ -1,10 +1,18 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
+import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "./schema";
+import { createDatabaseClient, migrate } from "./migrate.ts";
 
-export function getDb() {
-  if (!env.DB) throw new Error("D1 binding DB is unavailable.");
-  return drizzle(env.DB, { schema });
+export type Database = LibSQLDatabase<typeof schema>;
+
+let ready: Promise<Database> | null = null;
+
+async function open() {
+  const client = createDatabaseClient();
+  await migrate(client);
+  return drizzle(client, { schema });
 }
 
-export type Database = ReturnType<typeof getDb>;
+export function getDb() {
+  if (!ready) ready = open();
+  return ready;
+}

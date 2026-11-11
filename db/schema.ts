@@ -5,6 +5,8 @@ export const players = sqliteTable("players", {
   name: text("name").notNull(),
   createdAt: integer("created_at").notNull(),
   lastSeenAt: integer("last_seen_at").notNull(),
+  checkpointX: integer("checkpoint_x"),
+  checkpointZ: integer("checkpoint_z"),
 });
 
 export const sessions = sqliteTable("sessions", {
@@ -31,3 +33,9 @@ export const rateLimits = sqliteTable("rate_limits", {
   attempts: integer("attempts").notNull().default(1),
   expiresAt: integer("expires_at").notNull(),
 }, (table) => [index("rate_limits_expiry_idx").on(table.expiresAt)]);
+
+export const puzzleEvents = sqliteTable("puzzle_events", {
+  playerId: text("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [uniqueIndex("puzzle_player_action_unique").on(table.playerId, table.action)]);
